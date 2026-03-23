@@ -134,6 +134,25 @@ input,select,textarea{font-family:inherit}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:300;opacity:0;transition:.3s;pointer-events:none}
 .toast.show{opacity:1}
 
+/* NOTIFICATION TOAST */
+.notif-container{position:fixed;top:80px;right:20px;z-index:350;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.notif-toast{background:#fff;border-radius:12px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,.15);display:flex;align-items:center;gap:10px;font-size:13px;font-weight:500;pointer-events:auto;animation:notifIn .4s ease;min-width:280px;max-width:380px;border-left:4px solid var(--green)}
+.notif-toast.notif-project{border-left-color:var(--blue)}
+.notif-toast .notif-icon{font-size:20px;flex-shrink:0}
+.notif-toast .notif-text{flex:1}
+.notif-toast .notif-text strong{display:block;font-size:13px;color:var(--text)}
+.notif-toast .notif-text small{color:var(--text-light);font-size:11px}
+@keyframes notifIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes notifOut{from{transform:translateX(0);opacity:1}to{transform:translateX(100%);opacity:0}}
+
+/* ACTIVE USER ITEM */
+.active-user-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9}
+.active-user-item:last-child{border:none}
+.active-dot{width:10px;height:10px;border-radius:50%;background:var(--green);flex-shrink:0;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.active-user-name{font-weight:600;font-size:14px}
+.active-user-time{font-size:11px;color:var(--text-light);margin-left:auto}
+
 /* RESPONSIVE */
 @media(max-width:600px){
   .header-inner{flex-direction:column;align-items:stretch;gap:8px}
@@ -206,6 +225,14 @@ input,select,textarea{font-family:inherit}
         <div class="weekly-item"><div class="wnum" id="wLost">0</div><div class="wlabel">Alınamadı</div></div>
         <div class="weekly-item"><div class="wnum" id="wRevenue">₺0</div><div class="wlabel">Haftalık Ciro</div></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ADMIN: ACTIVE USERS -->
+  <div class="admin-section hidden" id="activeUsersSection">
+    <div class="admin-box" style="border-left:4px solid var(--green)">
+      <h3><span class="material-icons-round" style="color:var(--green)">person_pin</span> Aktif Kullanıcılar <span id="activeCount" style="background:var(--green);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;margin-left:6px">0</span></h3>
+      <div id="activeUsersList"></div>
     </div>
   </div>
 
@@ -313,6 +340,9 @@ input,select,textarea{font-family:inherit}
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<!-- NOTIFICATION CONTAINER -->
+<div class="notif-container" id="notifContainer"></div>
+
 <!-- FIREBASE -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -327,39 +357,100 @@ firebase.initializeApp({
 });
 const db = firebase.firestore();
 const projectsRef = db.collection("projects");
+const usersRef = db.collection("users");
 
 let currentUser = "";
 let isAdmin = false;
 let allProjects = [];
 let currentFilter = "all";
 let unsubscribe = null;
+let unsubUsers = null;
+let unsubNewProjects = null;
+let initialLoadDone = false;
+let knownUserIds = new Set();
 
-// LOGIN
+// CHECK ADMIN
+function checkAdmin(name){
+  const lower = name.toLowerCase().replace(/İ/g,"i").replace(/I/g,"ı");
+  return lower === "hüseyin" || lower === "huseyin";
+}
+
+// LOGIN - Firestore users collection'a kaydet
 function doLogin(){
   const name = document.getElementById("loginName").value.trim();
   if(!name){showToast("Lütfen adınızı girin!");return}
   currentUser = name;
-  isAdmin = name.toLowerCase().replace(/İ/g,"i").replace(/I/g,"ı") === "hüseyin" || name.toLowerCase() === "huseyin" || name.toLowerCase() === "hüseyin";
+  isAdmin = checkAdmin(name);
   localStorage.setItem("stp_user", name);
+  setUserOnline(name);
   showApp();
 }
 document.getElementById("loginName").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
 
+// Set user online in Firestore
+function setUserOnline(username){
+  const userDocId = username.toLowerCase().replace(/\s+/g,"_");
+  usersRef.doc(userDocId).set({
+    username: username,
+    isOnline: true,
+    loginTime: firebase.firestore.FieldValue.serverTimestamp(),
+    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+  }, {merge: true}).catch(err=>console.error("User online error:",err));
+
+  // Periodically update lastSeen
+  if(window._heartbeatInterval) clearInterval(window._heartbeatInterval);
+  window._heartbeatInterval = setInterval(()=>{
+    usersRef.doc(userDocId).update({
+      lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(()=>{});
+  }, 60000); // her 1 dakikada güncelle
+}
+
+// Set user offline in Firestore
+function setUserOffline(username){
+  if(window._heartbeatInterval) clearInterval(window._heartbeatInterval);
+  const userDocId = username.toLowerCase().replace(/\s+/g,"_");
+  usersRef.doc(userDocId).update({
+    isOnline: false,
+    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(err=>console.error("User offline error:",err));
+}
+
 function doLogout(){
+  // Kullanıcıyı offline yap
+  if(currentUser) setUserOffline(currentUser);
   if(unsubscribe) unsubscribe();
+  if(unsubUsers) unsubUsers();
+  if(unsubNewProjects) unsubNewProjects();
   localStorage.removeItem("stp_user");
-  currentUser="";isAdmin=false;allProjects=[];
+  currentUser="";isAdmin=false;allProjects=[];initialLoadDone=false;
+  knownUserIds.clear();
   document.getElementById("mainApp").classList.add("hidden");
   document.getElementById("loginPage").classList.remove("hidden");
   document.getElementById("loginName").value="";
 }
+
+// Handle page close - set offline
+window.addEventListener("beforeunload", ()=>{
+  if(currentUser){
+    const userDocId = currentUser.toLowerCase().replace(/\s+/g,"_");
+    // Use sendBeacon for reliable offline update
+    const url = `https://firestore.googleapis.com/v1/projects/stp-proje/databases/(default)/documents/users/${userDocId}?updateMask.fieldPaths=isOnline&updateMask.fieldPaths=lastSeen`;
+    // Fallback: just try regular update
+    usersRef.doc(userDocId).update({
+      isOnline: false,
+      lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(()=>{});
+  }
+});
 
 // AUTO LOGIN
 (function(){
   const saved = localStorage.getItem("stp_user");
   if(saved){
     currentUser = saved;
-    isAdmin = saved.toLowerCase().replace(/İ/g,"i").replace(/I/g,"ı") === "hüseyin" || saved.toLowerCase() === "huseyin" || saved.toLowerCase() === "hüseyin";
+    isAdmin = checkAdmin(saved);
+    setUserOnline(saved);
     showApp();
   }
 })();
@@ -372,19 +463,33 @@ function showApp(){
     document.getElementById("adminBadge").classList.remove("hidden");
     document.getElementById("weeklySection").classList.remove("hidden");
     document.getElementById("adminSection").classList.remove("hidden");
+    document.getElementById("activeUsersSection").classList.remove("hidden");
   } else {
     document.getElementById("adminBadge").classList.add("hidden");
     document.getElementById("weeklySection").classList.add("hidden");
     document.getElementById("adminSection").classList.add("hidden");
+    document.getElementById("activeUsersSection").classList.add("hidden");
   }
   startListening();
+  if(isAdmin){
+    startUserListener();
+    startProjectNotificationListener();
+  }
 }
 
-// REALTIME LISTENER
+// =============================================
+// REALTIME LISTENER - Projects
+// Admin: TÜM projeleri görür (addedBy filtresi YOK)
+// Personel: Sadece kendi projelerini görür
+// =============================================
 function startListening(){
   if(unsubscribe) unsubscribe();
-  let query = projectsRef.orderBy("createdAt","desc");
-  if(!isAdmin){
+  let query;
+  if(isAdmin){
+    // Admin TÜM projeleri görür - filtre yok
+    query = projectsRef.orderBy("createdAt","desc");
+  } else {
+    // Personel sadece kendi projelerini görür
     query = projectsRef.where("addedBy","==",currentUser).orderBy("createdAt","desc");
   }
   unsubscribe = query.onSnapshot(snap=>{
@@ -393,7 +498,7 @@ function startListening(){
     renderAll();
   }, err=>{
     console.error("Firestore error:",err);
-    // Fallback: try without orderBy for composite index issues
+    // Fallback: composite index yoksa orderBy olmadan dene
     let q2 = isAdmin ? projectsRef : projectsRef.where("addedBy","==",currentUser);
     unsubscribe = q2.onSnapshot(snap=>{
       allProjects = [];
@@ -402,6 +507,126 @@ function startListening(){
       renderAll();
     });
   });
+}
+
+// =============================================
+// REALTIME LISTENER - Active Users (Admin only)
+// onSnapshot ile canlı güncelleme
+// =============================================
+function startUserListener(){
+  if(unsubUsers) unsubUsers();
+  let firstSnapshot = true;
+  unsubUsers = usersRef.onSnapshot(snap=>{
+    const activeUsers = [];
+    const allUsers = [];
+    snap.forEach(doc=>{
+      const data = doc.data();
+      allUsers.push(data);
+      if(data.isOnline) activeUsers.push(data);
+    });
+
+    // Personel giriş bildirimi (ilk snapshot hariç)
+    if(!firstSnapshot && isAdmin){
+      snap.docChanges().forEach(change=>{
+        if(change.type === "modified" || change.type === "added"){
+          const data = change.doc.data();
+          const uname = data.username || "";
+          if(data.isOnline && !checkAdmin(uname)){
+            // Yeni giriş yapan personel bildirimi
+            if(!knownUserIds.has(change.doc.id+"_online")){
+              showNotification("👋 " + uname + " giriş yaptı!", "Personel şu anda aktif", "user");
+            }
+          }
+          if(data.isOnline) knownUserIds.add(change.doc.id+"_online");
+          else knownUserIds.delete(change.doc.id+"_online");
+        }
+      });
+    } else {
+      // İlk yüklemede mevcut online kullanıcıları kaydet
+      snap.forEach(doc=>{
+        const data = doc.data();
+        if(data.isOnline) knownUserIds.add(doc.id+"_online");
+      });
+    }
+    firstSnapshot = false;
+
+    renderActiveUsers(activeUsers);
+  }, err=>console.error("Users listener error:",err));
+}
+
+function renderActiveUsers(activeUsers){
+  const container = document.getElementById("activeUsersList");
+  const countEl = document.getElementById("activeCount");
+  if(!container) return;
+
+  countEl.textContent = activeUsers.length;
+
+  if(!activeUsers.length){
+    container.innerHTML = "<p style='color:var(--text-light);font-size:13px;padding:8px 0'>Şu anda aktif kullanıcı yok.</p>";
+    return;
+  }
+
+  let html = "";
+  activeUsers.forEach(u=>{
+    const loginTime = u.loginTime ? (u.loginTime.toDate ? u.loginTime.toDate() : new Date(u.loginTime)) : null;
+    const timeStr = loginTime ? loginTime.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}) : "";
+    const isAdminUser = checkAdmin(u.username||"");
+    html += `<div class="active-user-item">
+      <span class="active-dot"></span>
+      <span class="active-user-name">${esc(u.username||"Bilinmiyor")}${isAdminUser ? ' <span style="background:var(--accent);color:#fff;font-size:10px;padding:1px 6px;border-radius:4px">Yönetici</span>' : ''}</span>
+      <span class="active-user-time">Giriş: ${timeStr}</span>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+// =============================================
+// NOTIFICATION LISTENER - New Projects (Admin only)
+// Yeni proje eklendiğinde bildirim göster
+// =============================================
+function startProjectNotificationListener(){
+  if(unsubNewProjects) unsubNewProjects();
+  let firstLoad = true;
+  unsubNewProjects = projectsRef.onSnapshot(snap=>{
+    if(firstLoad){ firstLoad = false; return; }
+    snap.docChanges().forEach(change=>{
+      if(change.type === "added" && isAdmin){
+        const data = change.doc.data();
+        const addedBy = data.addedBy || "Bilinmiyor";
+        // Kendi eklediğimiz kayıtlar için bildirim gösterme
+        if(addedBy.toLowerCase() !== currentUser.toLowerCase()){
+          showNotification(
+            "📋 Yeni proje eklendi!",
+            `${esc(data.customerName||"İsimsiz")} — ${esc(addedBy)} tarafından`,
+            "project"
+          );
+        }
+      }
+    });
+  });
+}
+
+// =============================================
+// NOTIFICATION TOAST SYSTEM
+// =============================================
+function showNotification(title, subtitle, type){
+  const container = document.getElementById("notifContainer");
+  const div = document.createElement("div");
+  div.className = "notif-toast" + (type === "project" ? " notif-project" : "");
+  div.innerHTML = `
+    <span class="notif-icon">${type === "project" ? "📋" : "👤"}</span>
+    <div class="notif-text">
+      <strong>${title}</strong>
+      <small>${subtitle}</small>
+    </div>
+  `;
+  container.appendChild(div);
+
+  // 4 saniye sonra kaldır
+  setTimeout(()=>{
+    div.style.animation = "notifOut .4s ease forwards";
+    setTimeout(()=>div.remove(), 400);
+  }, 4000);
 }
 
 function renderAll(){
@@ -450,7 +675,7 @@ function renderWeekly(){
   document.getElementById("wRevenue").textContent="₺"+formatNum(wRev);
 }
 
-// USERS
+// USERS - Personel Özeti (proje bazlı)
 function renderUsers(){
   const userMap={};
   allProjects.forEach(p=>{
