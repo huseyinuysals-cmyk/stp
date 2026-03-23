@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>STP - Satış & Takip Sistemi</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #333; }
+  .screen { display: none; min-height: 100vh; padding: 20px; }
+  .screen.active { display: block; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* LOGIN */
+  #loginScreen { background: linear-gradient(135deg, #1a237e, #283593); display: flex; flex-direction: column; justify-content: center; align-items: center; }
+  .login-box { background: white; border-radius: 20px; padding: 40px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .login-box h1 { color: #1a237e; font-size: 28px; margin-bottom: 30px; }
+  input, select, textarea { width: 100%; padding: 14px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 16px; margin-bottom: 15px; outline: none; }
+  input:focus { border-color: #1a237e; }
+  .btn { width: 100%; padding: 14px; background: #1a237e; color: white; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; font-weight: 600; }
+  .btn-green { background: #2e7d32; }
+  .btn-outline { background: white; color: #1a237e; border: 2px solid #1a237e; margin-top: 10px; }
+
+  /* DASHBOARD */
+  .topbar { background: #1a237e; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; margin: -20px -20px 20px -20px; }
+  .badge-admin { background: #ff6f00; color: white; padding: 5px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; font-weight: bold; }
+  
+  .stats-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 20px; scrollbar-width: none; }
+  .stats-row::-webkit-scrollbar { display: none; }
+  .stat-card { background: white; border-radius: 15px; padding: 15px; min-width: 120px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.05); flex: 1; }
+  .stat-card .num { font-size: 22px; font-weight: bold; color: #1a237e; }
+  .stat-card .lbl { font-size: 10px; color: #888; text-transform: uppercase; margin-top: 5px; }
+
+  .filter-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 15px; margin-bottom: 10px; }
+  .filter-btn { padding: 6px 15px; border-radius: 20px; border: 1px solid #ddd; background: white; font-size: 12px; white-space: nowrap; cursor: pointer; }
+  .filter-btn.active { background: #1a237e; color: white; border-color: #1a237e; }
+
+  .customer-card { background: white; border-radius: 15px; padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-left: 5px solid #ddd; position: relative; }
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .card-name { font-weight: bold; font-size: 16px; }
+  .card-info { font-size: 13px; color: #666; margin-bottom: 4px; }
+  .card-footer { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; display: flex; justify-content: space-between; font-size: 11px; color: #aaa; }
+
+  .fab { position: fixed; bottom: 25px; right: 25px; width: 60px; height: 60px; background: #1a237e; color: white; border: none; border-radius: 50%; font-size: 30px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); cursor: pointer; z-index: 200; }
+
+  /* MODAL */
+  .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: flex-end; }
+  .modal-overlay.active { display: flex; }
+  .modal-content { background: white; width: 100%; border-radius: 25px 25px 0 0; padding: 25px; max-height: 90vh; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<!-- GİRİŞ -->
+<div id="loginScreen" class="screen active">
+  <div class="login-box">
+    <h1 id="mainLogo">🏗️ STP</h1>
+    <input type="text" id="userName" placeholder="Adınız Soyadınız">
+    <button class="btn" onclick="login()">Giriş Yap</button>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashScreen" class="screen">
+  <div class="topbar">
+    <div>
+      <h2 style="font-size: 18px;">🏗️ STP</h2>
+      <span id="userDisplay" style="font-size: 12px; opacity: 0.8;"></span>
+    </div>
+    <div id="adminArea" style="display:none">
+      <span class="badge-admin" onclick="showAdmin()">Yönetici</span>
+    </div>
+  </div>
+
+  <div class="stats-row" id="statsRow">
+    <!-- İstatistikler -->
+  </div>
+
+  <div style="font-size: 12px; color: #888; margin-bottom: 10px; font-weight: bold; text-transform: uppercase;">Müşteriler</div>
+  <div class="filter-row" id="filterRow">
+    <button class="filter-btn active" onclick="filterData('Hepsi', this)">Hepsi</button>
+    <button class="filter-btn" onclick="filterData('Teklif Hazır.', this)">Teklif Hazır.</button>
+    <button class="filter-btn" onclick="filterData('Verildi', this)">Verildi</button>
+    <button class="filter-btn" onclick="filterData('Alındı', this)">Alındı</button>
+    <button class="filter-btn" onclick="filterData('Alınamadı', this)">Alınamadı</button>
+  </div>
+
+  <div id="customerList"></div>
+  <button class="fab" onclick="openForm()">+</button>
+</div>
+
+<!-- FORM MODAL -->
+<div id="formModal" class="modal-overlay">
+  <div class="modal-content">
+    <h2 style="margin-bottom: 20px;">Yeni Kayıt</h2>
+    <input type="text" id="f_name" placeholder="Müşteri / Proje Adı *">
+    <button class="btn btn-outline" id="locBtn" onclick="getLocation()" style="margin-bottom: 15px;">📍 Konumumu Al</button>
+    <input type="text" id="f_address" placeholder="Adres (Otomatik dolar)">
+    <select id="f_status" onchange="togglePriceFields()">
+      <option value="Teklif Hazırlanacak">Teklif Hazırlanacak</option>
+      <option value="Teklif Verildi">Teklif Verildi</option>
+      <option value="Revizyon">Revizyon</option>
+      <option value="İş Alındı">İş Alındı ✅</option>
+      <option value="İş Alınamadı">İş Alınamadı ❌</option>
+    </select>
+    <div id="priceFields" style="display:none">
+      <input type="number" id="f_m2" placeholder="Toplam m²">
+      <input type="number" id="f_price" placeholder="Birim Fiyat (₺)">
+    </div>
+    <textarea id="f_note" placeholder="Görüşme notları..."></textarea>
+    <button class="btn btn-green" id="saveBtn" onclick="saveData()">💾 Kaydet</button>
+    <button class="btn btn-outline" onclick="closeModal()">İptal</button>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDfKX9HJnLh59Hl_GWffh5U7Hemp0EaLxU",
+    authDomain: "stp-proje.firebaseapp.com",
+    projectId: "stp-proje",
+    storageBucket: "stp-proje.firebasestorage.app",
+    messagingSenderId: "425140482397",
+    appId: "1:425140482397:web:47b30071226a364be478b4"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  let currentUser = "";
+  let lat = 0, lng = 0;
+  let allData = [];
+
+  window.login = function() {
+    const name = document.getElementById('userName').value.trim();
+    if(!name) return alert("İsim giriniz!");
+    currentUser = name;
+    localStorage.setItem('stp_user', name);
+    document.getElementById('userDisplay').innerText = name;
+    if(name.toLowerCase().includes("hüseyin")) document.getElementById('adminArea').style.display = "block";
+    showScreen('dashScreen');
+    loadData();
+  };
+
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  window.getLocation = function() {
+    const btn = document.getElementById('locBtn');
+    btn.innerText = "⌛ Konum alınıyor...";
+    navigator.geolocation.getCurrentPosition((pos) => {
+      lat = pos.coords.latitude; lng = pos.coords.longitude;
+      btn.innerText = "✅ Konum Alındı";
+      document.getElementById('f_address').value = lat.toFixed(4) + ", " + lng.toFixed(4);
+    }, () => btn.innerText = "❌ Hata!");
+  };
+
+  window.togglePriceFields = function() {
+    const status = document.getElementById('f_status').value;
+    document.getElementById('priceFields').style.display = status.includes("Alındı") ? "block" : "none";
+  };
+
+  window.saveData = async function() {
+    const name = document.getElementById('f_name').value;
+    if(!name) return alert("Ad giriniz!");
+    const status = document.getElementById('f_status').value;
+    const m2 = parseFloat(document.getElementById('f_m2').value) || 0;
+    const price = parseFloat(document.getElementById('f_price').value) || 0;
+
+    await addDoc(collection(db, "records"), {
+      name, status, m2, price, total: m2 * price,
+      note: document.getElementById('f_note').value,
+      address: document.getElementById('f_address').value,
+      createdBy: currentUser,
+      createdAt: serverTimestamp(),
+      week: getWeekNumber()
+    });
+    closeModal();
+  };
+
+  function loadData() {
+    const q = query(collection(db, "records"), orderBy("createdAt", "desc"));
+    onSnapshot(q, (snap) => {
+      allData = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      render(allData);
+    });
+  }
+
+  function render(data) {
+    const list = document.getElementById('customerList');
+    list.innerHTML = "";
+    let tM2 = 0, tCiro = 0, tWon = 0, tWait = 0;
+
+    data.forEach(item => {
+      if(item.status.includes("Alındı")) { tWon++; tM2 += item.m2; tCiro += item.total; }
+      else if(!item.status.includes("Alınamadı")) { tWait++; }
+
+      list.innerHTML += `
+        <div class="customer-card" style="border-left-color: ${item.status.includes('Alındı') ? '#4caf50' : '#ff9800'}">
+          <div class="card-header">
+            <div class="card-name">${item.name}</div>
+            <div style="font-size:10px; color:#1a237e; font-weight:bold">${item.status}</div>
+          </div>
+          <div class="card-info">📍 ${item.address || '-'}</div>
+          <div class="card-info">📝 ${item.note || '-'}</div>
+          ${item.total ? `<div class="card-info" style="color:#2e7d32; font-weight:bold">💰 ${item.total.toLocaleString()} ₺</div>` : ''}
+          <div class="card-footer"><span>👤 ${item.createdBy}</span><span>📅 ${item.createdAt ? new Date(item.createdAt.seconds*1000).toLocaleDateString() : 'Yeni'}</span></div>
+        </div>
+      `;
+    });
+
+    document.getElementById('statsRow').innerHTML = `
+      <div class="stat-card"><div class="num">${data.length}</div><div class="lbl">Toplam</div></div>
+      <div class="stat-card"><div class="num">${tWait}</div><div class="lbl">Bekleyen</div></div>
+      <div class="stat-card"><div class="num">${tWon}</div><div class="lbl">Alınan</div></div>
+      <div class="stat-card"><div class="num">${tM2}</div><div class="lbl">m²</div></div>
+      <div class="stat-card"><div class="num">₺${tCiro.toLocaleString()}</div><div class="lbl">Ciro</div></div>
+    `;
+  }
+
+  window.filterData = (status, btn) => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if(status === 'Hepsi') render(allData);
+    else render(allData.filter(d => d.status.includes(status)));
+  };
+
+  window.openForm = () => document.getElementById('formModal').classList.add('active');
+  window.closeModal = () => {
+    document.getElementById('formModal').classList.remove('active');
+    ['f_name','f_m2','f_price','f_note','f_address'].forEach(id => document.getElementById(id).value = "");
+  };
+
+  function getWeekNumber() {
+    const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+  }
+
+  const saved = localStorage.getItem('stp_user');
+  if(saved) { document.getElementById('userName').value = saved; login(); }
+</script>
+</body>
+</html>
